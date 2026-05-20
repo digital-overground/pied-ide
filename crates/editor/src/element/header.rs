@@ -6,9 +6,9 @@ use file_icons::FileIcons;
 use git::status::FileStatus;
 use gpui::{
     Action, AnyElement, App, AvailableSpace, Bounds, ClickEvent, ClipboardItem, ContentMask,
-    CursorStyle, DefiniteLength, Entity, Focusable as _, Hitbox, HitboxBehavior, Hsla, IntoElement,
-    Length, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Pixels,
-    ShapedLine, SharedString, Styled, TextAlign, Window, WindowBackgroundAppearance, div, fill,
+    DefiniteLength, Entity, Focusable as _, Hitbox, HitboxBehavior, Hsla, IntoElement, Length,
+    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Pixels, ShapedLine,
+    SharedString, Styled, TextAlign, Window, WindowBackgroundAppearance, div, fill,
     linear_color_stop, linear_gradient, point, px, size,
 };
 use language::language_settings::ShowWhitespaceSetting;
@@ -28,7 +28,7 @@ use workspace::{ItemHandle, ItemSettings, OpenInTerminal, OpenTerminal, RevealIn
 
 use super::{
     BlockLayout, EditorElement, EditorLayout, LineWithInvisibles, layout_line,
-    render_breadcrumb_text,
+    render_breadcrumb_text, text_cursor_style,
 };
 use crate::{
     BUFFER_HEADER_PADDING, DisplayRow, Editor, EditorSettings, EditorSnapshot, FILE_HEADER_HEIGHT,
@@ -461,7 +461,10 @@ impl StickyHeaders {
                 },
             );
 
-            window.set_cursor_style(CursorStyle::IBeam, &line.hitbox);
+            window.set_cursor_style(
+                text_cursor_style(!layout.typing_explosions.is_empty()),
+                &line.hitbox,
+            );
         }
     }
 }
