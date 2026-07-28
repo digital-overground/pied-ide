@@ -55,6 +55,8 @@ cargo fmt --all -- --check
 cargo check -p release_channel -p zed
 ```
 
+Pull requests and pushes to `main` run the `Pied CI` workflow. Release publishing also runs that CI workflow against the release tag before building or uploading release assets.
+
 ## License
 
 Pied IDE inherits Zed's licensing. Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.

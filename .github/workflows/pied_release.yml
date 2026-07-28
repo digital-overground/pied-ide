@@ -99,9 +99,20 @@ jobs:
             gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file release-notes.md
           fi
 
+  quality_gate:
+    name: Quality gate
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+
   build_linux:
     name: Build Linux ${{ matrix.arch }}
-    needs: prepare
+    needs:
+      - prepare
+      - quality_gate
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -141,7 +152,9 @@ jobs:
 
   build_macos:
     name: Build macOS ${{ matrix.arch }}
-    needs: prepare
+    needs:
+      - prepare
+      - quality_gate
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     env:
@@ -186,7 +199,9 @@ jobs:
 
   build_windows:
     name: Build Windows x86_64
-    needs: prepare
+    needs:
+      - prepare
+      - quality_gate
     runs-on: windows-2022
     timeout-minutes: 360
     steps:

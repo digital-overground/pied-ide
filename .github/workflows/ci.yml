@@ -1,0 +1,180 @@
+name: Pied CI
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to validate. Defaults to the triggering commit."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  style:
+    name: Style
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_call' && inputs.ref || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Check Prettier formatting
+        run: ./script/prettier
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check tracked TODO markers
+        run: ./script/check-todos
+
+      - name: Check keymaps
+        run: ./script/check-keymaps
+
+      - name: Check typos
+        uses: crate-ci/typos@v1
+        with:
+          config: ./typos.toml
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      CC: clang
+      CXX: clang++
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 500ms
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_call' && inputs.ref || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Linux dependencies
+        run: ./script/linux
+
+      - name: Install WASI SDK
+        run: ./script/download-wasi-sdk
+
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Configure CI Rust flags
+        run: |
+          mkdir -p ../.cargo
+          cp .cargo/ci-config.toml ../.cargo/config.toml
+
+      - name: Run clippy
+        run: ./script/clippy
+
+      - name: Run tests
+        run: cargo nextest run --workspace --no-fail-fast --no-tests=warn
+
+      - name: Clean up CI Rust flags
+        if: always()
+        run: rm -rf ../.cargo
+
+  workflow:
+    name: Workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_call' && inputs.ref || github.sha }}
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Check shell scripts
+        run: ./script/shellcheck-scripts error
+
+      - name: Install actionlint
+        id: actionlint
+        run: bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+
+      - name: Check workflows
+        env:
+          ACTIONLINT_BIN: ${{ steps.actionlint.outputs.executable }}
+        run: '"$ACTIONLINT_BIN" -color'
+
+      - name: Check workflow security
+        uses: zizmorcore/zizmor-action@v0.5.6
+        with:
+          advanced-security: false
+          min-severity: high
+
+  quality_gate:
+    name: Quality gate
+    needs:
+      - style
+      - rust
+      - workflow
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify required checks passed
+        env:
+          STYLE_RESULT: ${{ needs.style.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          WORKFLOW_RESULT: ${{ needs.workflow.result }}
+        run: |
+          set -euo pipefail
+
+          failed=0
+          for result in STYLE_RESULT RUST_RESULT WORKFLOW_RESULT; do
+            value="${!result}"
+            echo "$result=$value"
+            if [[ "$value" != "success" ]]; then
+              failed=1
+            fi
+          done
+
+          exit "$failed"
