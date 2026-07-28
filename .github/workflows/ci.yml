@@ -80,6 +80,11 @@ jobs:
             exit 0
           fi
 
+          echo "Pull request event; Rust validation is deferred to manual and stable release workflows."
+          echo "nextest_filter=" >> "$GITHUB_OUTPUT"
+          echo "run_rust=false" >> "$GITHUB_OUTPUT"
+          exit 0
+
           if echo "$changed_files" | grep -qEv '^(README\.md|docs/.*|\.github/(workflows/.*|actions/.*|ISSUE_TEMPLATE/.*)|script/install\.sh|typos\.toml)$'; then
             echo "Rust-relevant changes detected."
             if echo "$changed_files" | grep -qP '^(rust-toolchain\.toml|\.cargo/|Cargo\.(toml|lock)$)'; then
