@@ -158,8 +158,8 @@ linux() {
 
 macos() {
     echo "Downloading Pied IDE version: $ZED_VERSION"
-    curl "$(release_download_base "$ZED_VERSION")/Zed-$arch.dmg" > "$temp/Zed-$arch.dmg"
-    hdiutil attach -quiet "$temp/Zed-$arch.dmg" -mountpoint "$temp/mount"
+    curl "$(release_download_base "$ZED_VERSION")/Pied-$arch.dmg" > "$temp/Pied-$arch.dmg"
+    hdiutil attach -quiet "$temp/Pied-$arch.dmg" -mountpoint "$temp/mount"
     app="$(cd "$temp/mount/"; echo *.app)"
     echo "Installing $app"
     if [ -d "/Applications/$app" ]; then

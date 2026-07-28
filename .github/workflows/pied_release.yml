@@ -81,7 +81,7 @@ jobs:
             echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/script/install.sh | sh"
             echo '```'
             echo
-            echo "Windows: download the \`Zed-x86_64.exe\` installer below."
+            echo "Windows: download the \`Pied-x86_64.exe\` installer below."
             echo
             echo "## Changes"
             echo
@@ -191,10 +191,13 @@ jobs:
       - name: Build macOS bundle
         run: ./script/bundle-mac ${{ matrix.target }}
 
+      - name: Rename macOS installer
+        run: mv target/${{ matrix.target }}/release/Zed-${{ matrix.arch }}.dmg target/${{ matrix.target }}/release/Pied-${{ matrix.arch }}.dmg
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Zed-${{ matrix.arch }}.dmg
-          path: target/${{ matrix.target }}/release/Zed-${{ matrix.arch }}.dmg
+          name: Pied-${{ matrix.arch }}.dmg
+          path: target/${{ matrix.target }}/release/Pied-${{ matrix.arch }}.dmg
           if-no-files-found: error
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -224,10 +227,14 @@ jobs:
         shell: pwsh
         run: script/bundle-windows.ps1 -Architecture x86_64
 
+      - name: Rename Windows installer
+        shell: pwsh
+        run: Move-Item -Path target/Zed-x86_64.exe -Destination target/Pied-x86_64.exe -Force
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Zed-x86_64.exe
-          path: target/Zed-x86_64.exe
+          name: Pied-x86_64.exe
+          path: target/Pied-x86_64.exe
           if-no-files-found: error
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
