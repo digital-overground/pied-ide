@@ -1,0 +1,232 @@
+name: Pied IDE Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to publish, such as v1.14.1'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pied-ide-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$INPUT_TAG"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "::error::Release tags must look like v1.2.3, got $tag"
+            exit 1
+          fi
+
+          git rev-parse "$tag" >/dev/null
+
+          crate_version="$(script/get-crate-version zed)"
+          if [[ "$tag" != "v$crate_version" ]]; then
+            echo "::error::Tag $tag does not match crates/zed version v$crate_version"
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          previous_tag="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+          if [[ -n "$previous_tag" ]]; then
+            range="$previous_tag..$TAG"
+            changelog_url="https://github.com/$GITHUB_REPOSITORY/compare/$previous_tag...$TAG"
+          else
+            range="$TAG"
+            changelog_url="https://github.com/$GITHUB_REPOSITORY/commits/$TAG"
+          fi
+
+          {
+            echo "## Install"
+            echo
+            echo "macOS and Linux:"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/script/install.sh | sh"
+            echo '```'
+            echo
+            echo "Windows: download the \`Zed-x86_64.exe\` installer below."
+            echo
+            echo "## Changes"
+            echo
+            git log --pretty=format:"- %s (%h)" "$range"
+            echo
+            echo
+            echo "[Full Changelog]($changelog_url)"
+          } > release-notes.md
+
+      - name: Create or update draft release
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file release-notes.md
+          fi
+
+  build_linux:
+    name: Build Linux ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Linux dependencies
+        run: ./script/linux
+
+      - name: Build Linux bundle
+        run: ./script/bundle-linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zed-linux-${{ matrix.arch }}.tar.gz
+          path: target/release/zed-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zed-remote-server-linux-${{ matrix.arch }}.gz
+          path: target/zed-remote-server-linux-${{ matrix.arch }}.gz
+          if-no-files-found: error
+
+  build_macos:
+    name: Build macOS ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            target: aarch64-apple-darwin
+            runner: macos-26
+          - arch: x86_64
+            target: x86_64-apple-darwin
+            runner: macos-26-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build macOS bundle
+        run: ./script/bundle-mac ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zed-${{ matrix.arch }}.dmg
+          path: target/${{ matrix.target }}/release/Zed-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zed-remote-server-macos-${{ matrix.arch }}.gz
+          path: target/zed-remote-server-macos-${{ matrix.arch }}.gz
+          if-no-files-found: error
+
+  build_windows:
+    name: Build Windows x86_64
+    needs: prepare
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: script/bundle-windows.ps1 -Architecture x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zed-x86_64.exe
+          path: target/Zed-x86_64.exe
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zed-remote-server-windows-x86_64.zip
+          path: target/zed-remote-server-windows-x86_64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs:
+      - prepare
+      - build_linux
+      - build_macos
+      - build_windows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Upload release assets
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find release-artifacts -maxdepth 1 -type f -print -exec ls -lh {} \;
+          gh release upload "$TAG" release-artifacts/* --clobber
+          gh release edit "$TAG" --draft=false

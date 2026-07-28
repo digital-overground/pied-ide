@@ -1,14 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
-# Downloads a tarball from https://zed.dev/releases and unpacks it
-# into ~/.local/. If you'd prefer to do this manually, instructions are at
-# https://zed.dev/docs/linux.
+# Downloads a Pied IDE release from GitHub and installs it.
 
 main() {
     platform="$(uname -s)"
     arch="$(uname -m)"
-    channel="${ZED_CHANNEL:-stable}"
+    repo="${PIED_IDE_RELEASE_REPO:-digital-overground/pied-ide}"
+    channel="${ZED_CHANNEL:-dev}"
     ZED_VERSION="${ZED_VERSION:-latest}"
     # Use TMPDIR if available (for environments with non-standard temp directories)
     if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
@@ -55,9 +54,9 @@ main() {
     "$platform" "$@"
 
     if [ "$(command -v zed)" = "$HOME/.local/bin/zed" ]; then
-        echo "Zed has been installed. Run with 'zed'"
+        echo "Pied IDE has been installed. Run with 'zed'"
     else
-        echo "To run Zed from your terminal, you must add ~/.local/bin to your PATH"
+        echo "To run Pied IDE from your terminal, you must add ~/.local/bin to your PATH"
         echo "Run:"
 
         case "$SHELL" in
@@ -74,16 +73,32 @@ main() {
                 ;;
         esac
 
-        echo "To run Zed now, '~/.local/bin/zed'"
+        echo "To run Pied IDE now, '~/.local/bin/zed'"
     fi
+}
+
+release_download_base() {
+    version="$1"
+
+    if [ "$version" = "latest" ]; then
+        echo "https://github.com/$repo/releases/latest/download"
+        return
+    fi
+
+    case "$version" in
+        v*) tag="$version" ;;
+        *) tag="v$version" ;;
+    esac
+
+    echo "https://github.com/$repo/releases/download/$tag"
 }
 
 linux() {
     if [ -n "${ZED_BUNDLE_PATH:-}" ]; then
         cp "$ZED_BUNDLE_PATH" "$temp/zed-linux-$arch.tar.gz"
     else
-        echo "Downloading Zed version: $ZED_VERSION"
-        curl "https://cloud.zed.dev/releases/$channel/$ZED_VERSION/download?asset=zed&arch=$arch&os=linux&source=install.sh" > "$temp/zed-linux-$arch.tar.gz"
+        echo "Downloading Pied IDE version: $ZED_VERSION"
+        curl "$(release_download_base "$ZED_VERSION")/zed-linux-$arch.tar.gz" > "$temp/zed-linux-$arch.tar.gz"
     fi
 
     suffix=""
@@ -141,8 +156,8 @@ linux() {
 }
 
 macos() {
-    echo "Downloading Zed version: $ZED_VERSION"
-    curl "https://cloud.zed.dev/releases/$channel/$ZED_VERSION/download?asset=zed&os=macos&arch=$arch&source=install.sh" > "$temp/Zed-$arch.dmg"
+    echo "Downloading Pied IDE version: $ZED_VERSION"
+    curl "$(release_download_base "$ZED_VERSION")/Zed-$arch.dmg" > "$temp/Zed-$arch.dmg"
     hdiutil attach -quiet "$temp/Zed-$arch.dmg" -mountpoint "$temp/mount"
     app="$(cd "$temp/mount/"; echo *.app)"
     echo "Installing $app"

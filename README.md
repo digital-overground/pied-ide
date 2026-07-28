@@ -3,6 +3,12 @@
 [![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
 [![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
 
+This fork publishes Pied IDE builds from [digital-overground/pied-ide](https://github.com/digital-overground/pied-ide/releases).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | sh
+```
+
 Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
 
 ---
@@ -46,4 +52,3 @@ Zed is developed by **Zed Industries, Inc.**, a for-profit company.
 If you’d like to financially support the project, you can do so via GitHub Sponsors.
 Sponsorships go directly to Zed Industries and are used as general company revenue.
 There are no perks or entitlements associated with sponsorship.
-

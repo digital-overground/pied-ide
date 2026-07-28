@@ -47,6 +47,8 @@ impl std::error::Error for MissingDependencyError {}
 const POLL_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const NIGHTLY_POLL_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const REMOTE_SERVER_CACHE_LIMIT: usize = 5;
+const PIED_IDE_RELEASE_REPO: &str = "digital-overground/pied-ide";
+const GITHUB_API_BASE_URL: &str = "https://api.github.com/repos";
 
 #[cfg(target_os = "linux")]
 fn linux_rsync_install_hint() -> &'static str {
@@ -108,16 +110,6 @@ actions!(
         ViewReleaseNotes,
     ]
 );
-
-#[derive(Serialize, Debug)]
-pub struct AssetQuery<'a> {
-    asset: &'a str,
-    os: &'a str,
-    arch: &'a str,
-    metrics_id: Option<&'a str>,
-    system_id: Option<&'a str>,
-    is_staff: Option<bool>,
-}
 
 #[derive(Clone, Debug)]
 pub enum AutoUpdateStatus {
@@ -187,6 +179,81 @@ pub struct AutoUpdater {
 pub struct ReleaseAsset {
     pub version: String,
     pub url: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+fn pied_ide_release_repo() -> String {
+    env::var("PIED_IDE_RELEASE_REPO").unwrap_or_else(|_| PIED_IDE_RELEASE_REPO.to_string())
+}
+
+fn github_release_version(tag_name: &str) -> String {
+    tag_name.trim_start_matches('v').to_string()
+}
+
+fn github_release_tag(version: &str) -> String {
+    if version.starts_with('v') {
+        version.to_string()
+    } else {
+        format!("v{version}")
+    }
+}
+
+fn github_release_api_url(version: &str) -> String {
+    let repo = pied_ide_release_repo();
+    if version == "latest" {
+        format!("{GITHUB_API_BASE_URL}/{repo}/releases/latest")
+    } else {
+        format!(
+            "{GITHUB_API_BASE_URL}/{repo}/releases/tags/{}",
+            github_release_tag(version)
+        )
+    }
+}
+
+fn github_release_asset_name(asset: &str, os: &str, arch: &str) -> Result<String> {
+    match (asset, os) {
+        ("zed", "macos") => Ok(format!("Zed-{arch}.dmg")),
+        ("zed", "linux") => Ok(format!("zed-linux-{arch}.tar.gz")),
+        ("zed", "windows") => Ok(format!("Zed-{arch}.exe")),
+        ("zed-remote-server", "macos") => Ok(format!("zed-remote-server-macos-{arch}.gz")),
+        ("zed-remote-server", "linux") => Ok(format!("zed-remote-server-linux-{arch}.gz")),
+        ("zed-remote-server", "windows") => Ok(format!("zed-remote-server-windows-{arch}.zip")),
+        _ => anyhow::bail!("unsupported release asset {asset} for {os} {arch}"),
+    }
+}
+
+async fn fetch_github_release(
+    client: Arc<HttpClientWithUrl>,
+    version: &str,
+) -> Result<GitHubRelease> {
+    let url = github_release_api_url(version);
+    let mut response = client.get(url.as_str(), Default::default(), true).await?;
+    let mut body = Vec::new();
+    response.body_mut().read_to_end(&mut body).await?;
+
+    anyhow::ensure!(
+        response.status().is_success(),
+        "failed to fetch GitHub release: {:?}",
+        String::from_utf8_lossy(&body),
+    );
+
+    serde_json::from_slice(body.as_slice()).with_context(|| {
+        format!(
+            "error deserializing GitHub release {:?}",
+            String::from_utf8_lossy(&body),
+        )
+    })
 }
 
 struct MacOsUnmounter<'a> {
@@ -339,20 +406,24 @@ pub fn check(_: &Check, window: &mut Window, cx: &mut App) {
 pub fn release_notes_url(cx: &mut App) -> Option<String> {
     let release_channel = ReleaseChannel::try_global(cx)?;
     let url = match release_channel {
-        ReleaseChannel::Stable | ReleaseChannel::Preview => {
+        ReleaseChannel::Dev | ReleaseChannel::Stable | ReleaseChannel::Preview => {
             let auto_updater = AutoUpdater::get(cx)?;
             let auto_updater = auto_updater.read(cx);
             let mut current_version = auto_updater.current_version.clone();
             current_version.pre = semver::Prerelease::EMPTY;
             current_version.build = semver::BuildMetadata::EMPTY;
-            let release_channel = release_channel.dev_name();
-            let path = format!("/releases/{release_channel}/{current_version}");
-            auto_updater.client.http_client().build_url(&path)
+            format!(
+                "https://github.com/{}/releases/tag/{}",
+                pied_ide_release_repo(),
+                github_release_tag(&current_version.to_string())
+            )
         }
         ReleaseChannel::Nightly => {
-            "https://github.com/zed-industries/zed/commits/nightly/".to_string()
+            format!(
+                "https://github.com/{}/commits/main/",
+                pied_ide_release_repo()
+            )
         }
-        ReleaseChannel::Dev => "https://github.com/zed-industries/zed/commits/main/".to_string(),
     };
     Some(url)
 }
@@ -650,16 +721,6 @@ impl AutoUpdater {
     ) -> Result<ReleaseAsset> {
         let client = this.read_with(cx, |this, _| this.client.clone());
 
-        let (system_id, metrics_id, is_staff) = if client.telemetry().metrics_enabled() {
-            (
-                client.telemetry().system_id(),
-                client.telemetry().metrics_id(),
-                client.telemetry().is_staff(),
-            )
-        } else {
-            (None, None, None)
-        };
-
         let version = if let Some(mut version) = version {
             version.pre = semver::Prerelease::EMPTY;
             version.build = semver::BuildMetadata::EMPTY;
@@ -669,36 +730,28 @@ impl AutoUpdater {
         };
         let http_client = client.http_client();
 
-        let path = format!("/releases/{}/{}/asset", release_channel.dev_name(), version,);
-        let url = http_client.build_zed_cloud_url_with_query(
-            &path,
-            AssetQuery {
-                os,
-                arch,
-                asset,
-                metrics_id: metrics_id.as_deref(),
-                system_id: system_id.as_deref(),
-                is_staff,
-            },
-        )?;
+        let release = fetch_github_release(http_client.clone(), &version).await?;
+        let asset_name = github_release_asset_name(asset, os, arch)?;
+        let release_version = github_release_version(&release.tag_name);
+        let url = release
+            .assets
+            .into_iter()
+            .find(|release_asset| release_asset.name == asset_name)
+            .map(|release_asset| release_asset.browser_download_url)
+            .with_context(|| {
+                format!(
+                    "GitHub release {} does not contain asset {} for {} {} {}",
+                    release_version,
+                    asset_name,
+                    release_channel.dev_name(),
+                    os,
+                    arch
+                )
+            })?;
 
-        let mut response = http_client
-            .get(url.as_str(), Default::default(), true)
-            .await?;
-        let mut body = Vec::new();
-        response.body_mut().read_to_end(&mut body).await?;
-
-        anyhow::ensure!(
-            response.status().is_success(),
-            "failed to fetch release: {:?}",
-            String::from_utf8_lossy(&body),
-        );
-
-        serde_json::from_slice(body.as_slice()).with_context(|| {
-            format!(
-                "error deserializing release {:?}",
-                String::from_utf8_lossy(&body),
-            )
+        Ok(ReleaseAsset {
+            version: release_version,
+            url,
         })
     }
 
@@ -1376,27 +1429,40 @@ mod tests {
             let clock = Arc::new(FakeSystemClock::new());
             let release_available = Arc::clone(&release_available);
             let dmg_rx = Arc::new(parking_lot::Mutex::new(Some(dmg_rx)));
+            let asset_name = github_release_asset_name("zed", OS, ARCH).unwrap();
             let fake_client_http = FakeHttpClient::create(move |req| {
                 let release_available = release_available.load(atomic::Ordering::Relaxed);
                 let dmg_rx = dmg_rx.clone();
+                let asset_name = asset_name.clone();
                 async move {
-                if req.uri().path() == "/releases/stable/latest/asset" {
-                    if release_available {
-                        return Ok(Response::builder().status(200).body(
-                            r#"{"version":"0.100.1","url":"https://test.example/new-download"}"#.into()
-                        ).unwrap());
-                    } else {
-                        return Ok(Response::builder().status(200).body(
-                            r#"{"version":"0.100.0","url":"https://test.example/old-download"}"#.into()
-                        ).unwrap());
+                    if req.uri().path() == "/repos/digital-overground/pied-ide/releases/latest" {
+                        let tag_name = if release_available { "v0.100.1" } else { "v0.100.0" };
+                        return Ok(Response::builder()
+                            .status(200)
+                            .body(
+                                serde_json::json!({
+                                    "tag_name": tag_name,
+                                    "assets": [
+                                        {
+                                            "name": asset_name,
+                                            "browser_download_url": "https://test.example/new-download"
+                                        }
+                                    ]
+                                })
+                                .to_string()
+                                .into(),
+                            )
+                            .unwrap());
+                    } else if req.uri().path() == "/new-download" {
+                        return Ok(Response::builder()
+                            .status(200)
+                            .body({
+                                let dmg_rx = dmg_rx.lock().take().unwrap();
+                                dmg_rx.await.unwrap().into()
+                            })
+                            .unwrap());
                     }
-                } else if req.uri().path() == "/new-download" {
-                    return Ok(Response::builder().status(200).body({
-                        let dmg_rx = dmg_rx.lock().take().unwrap();
-                        dmg_rx.await.unwrap().into()
-                    }).unwrap());
-                }
-                Ok(Response::builder().status(404).body("".into()).unwrap())
+                    Ok(Response::builder().status(404).body("".into()).unwrap())
                 }
             });
             let client = Client::new(clock, fake_client_http, cx);
