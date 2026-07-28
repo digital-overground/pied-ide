@@ -37,6 +37,7 @@ jobs:
     name: Changes
     runs-on: ubuntu-24.04
     outputs:
+      nextest_filter: ${{ steps.plan.outputs.nextest_filter }}
       run_rust: ${{ steps.plan.outputs.run_rust }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -56,12 +57,14 @@ jobs:
 
           if [[ "$RUN_FULL_TESTS" == "true" ]]; then
             echo "Release or manual caller requested full Rust validation."
+            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
             echo "run_rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [[ "$EVENT_NAME" != "pull_request" ]]; then
             echo "Non-PR event; running Rust validation."
+            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
             echo "run_rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -72,15 +75,42 @@ jobs:
           echo "$changed_files"
 
           if [[ -z "$changed_files" ]]; then
+            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
             echo "run_rust=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if echo "$changed_files" | grep -qEv '^(README\.md|docs/|\.github/(workflows/|actions/|ISSUE_TEMPLATE/)|script/install\.sh|typos\.toml)$'; then
             echo "Rust-relevant changes detected."
+            if echo "$changed_files" | grep -qP '^(rust-toolchain\.toml|\.cargo/|Cargo\.(toml|lock)$)'; then
+              echo "Root Cargo or toolchain configuration changed; running all tests."
+              echo "nextest_filter=" >> "$GITHUB_OUTPUT"
+            else
+              changed_dirs="$(echo "$changed_files" | grep -oP '^(crates|tooling)/\K[^/]+' | sort -u || true)"
+              dir_to_pkg="$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[] | select(.manifest_path | test("/(crates|tooling)/")) | "\(.manifest_path | capture("/(crates|tooling)/(?<dir>[^/]+)/").dir)=\(.name)"')"
+              changed_packages=""
+
+              for dir in $changed_dirs; do
+                package="$(echo "$dir_to_pkg" | grep "^${dir}=" | cut -d= -f2 | head -1 || true)"
+                if [[ -n "$package" ]]; then
+                  changed_packages="$(printf '%s\n%s' "$changed_packages" "$package")"
+                fi
+              done
+
+              changed_packages="$(echo "$changed_packages" | grep -v '^$' | sort -u || true)"
+              if [[ -n "$changed_packages" ]]; then
+                nextest_filter="$(echo "$changed_packages" | sed 's/.*/rdeps(&)/' | paste -sd '|')"
+                echo "Nextest filter: $nextest_filter"
+                echo "nextest_filter=$nextest_filter" >> "$GITHUB_OUTPUT"
+              else
+                echo "No crate-specific package filter found; running all tests."
+                echo "nextest_filter=" >> "$GITHUB_OUTPUT"
+              fi
+            fi
             echo "run_rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "Only documentation, workflow, install script, or typo configuration changed."
+            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
             echo "run_rust=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -177,7 +207,16 @@ jobs:
         run: ./script/clippy
 
       - name: Run tests
-        run: cargo nextest run --workspace --no-fail-fast --no-tests=warn
+        env:
+          NEXTEST_FILTER: ${{ needs.changes.outputs.nextest_filter }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$NEXTEST_FILTER" ]]; then
+            cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "$NEXTEST_FILTER"
+          else
+            cargo nextest run --workspace --no-fail-fast --no-tests=warn
+          fi
 
       - name: Clean up CI Rust flags
         if: always()
