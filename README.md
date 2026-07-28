@@ -1,54 +1,62 @@
-# Zed
+# Pied IDE
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
+Pied IDE is Digital Overground's public fork of [Zed](https://github.com/zed-industries/zed). It tracks upstream Zed while publishing Pied builds and update metadata from [digital-overground/pied-ide](https://github.com/digital-overground/pied-ide).
 
-This fork publishes Pied IDE builds from [digital-overground/pied-ide](https://github.com/digital-overground/pied-ide/releases).
+This fork keeps Zed's fast editor foundation and adds the release/update path needed for the Pied + Pi ACP setup. Some internal names, commands, and release asset filenames still use `zed` so the fork can continue merging upstream changes with less friction.
+
+## Install
+
+Install the latest macOS or Linux release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | sh
 ```
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+Install a pinned version:
 
----
+```sh
+curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | ZED_VERSION=1.0.0 sh
+```
 
-### Installation
+Windows users can download the installer from [GitHub Releases](https://github.com/digital-overground/pied-ide/releases). Current release asset names are:
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+- macOS Apple Silicon: `Zed-aarch64.dmg`
+- macOS Intel: `Zed-x86_64.dmg`
+- Linux ARM64: `zed-linux-aarch64.tar.gz`
+- Linux x86_64: `zed-linux-x86_64.tar.gz`
+- Windows x86_64: `Zed-x86_64.exe`
 
-Other platforms are not yet available:
+## Releases and Updates
 
-- Web ([tracking discussion](https://github.com/zed-industries/zed/discussions/26195))
+Pied IDE uses its own semantic version stream. The app version lives in [crates/zed/Cargo.toml](./crates/zed/Cargo.toml), and release tags must match it as `vMAJOR.MINOR.PATCH`.
 
-### Developing Zed
+Publishing a tag such as `v1.0.0` runs the `Pied IDE Release` workflow, which builds macOS DMGs, Linux tarballs, the Windows installer, and remote-server assets, then uploads them to GitHub Releases.
+
+The in-app updater checks [digital-overground/pied-ide releases](https://github.com/digital-overground/pied-ide/releases). Set `PIED_IDE_RELEASE_REPO=owner/repo` only when testing against another release repository.
+
+## Upstream
+
+This repository remains a GitHub fork of [zed-industries/zed](https://github.com/zed-industries/zed), so upstream Zed changes can be fetched and merged over time.
+
+The practical rule for this fork is to keep Pied-specific changes small, visible, and easy to reapply during upstream merges.
+
+## Developing
+
+Most upstream Zed development documentation still applies:
 
 - [Building Zed for macOS](./docs/src/development/macos.md)
 - [Building Zed for Linux](./docs/src/development/linux.md)
 - [Building Zed for Windows](./docs/src/development/windows.md)
 
-### Contributing
+Useful local checks:
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
+```sh
+cargo fmt --all -- --check
+cargo check -p release_channel -p zed
+```
 
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+## License
 
-### Licensing
+Pied IDE inherits Zed's licensing. Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.
 
-Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.
-
-License information for third party dependencies must be correctly provided for CI to pass.
-
-We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automatically comply with open source licenses. If CI is failing, check the following:
-
-- Is it showing a `no license specified` error for a crate you've created? If so, add `publish = false` under `[package]` in your crate's Cargo.toml.
-- Is the error `failed to satisfy license requirements` for a dependency? If so, first determine what license the project has and whether this system is sufficient to comply with this license's requirements. If you're unsure, ask a lawyer. Once you've verified that this system is acceptable add the license's SPDX identifier to the `accepted` array in `script/licenses/zed-licenses.toml`.
-- Is `cargo-about` unable to find the license for a dependency? If so, add a clarification field at the end of `script/licenses/zed-licenses.toml`, as specified in the [cargo-about book](https://embarkstudios.github.io/cargo-about/cli/generate/config.html#crate-configuration).
-
-## Sponsorship
-
-Zed is developed by **Zed Industries, Inc.**, a for-profit company.
-
-If you’d like to financially support the project, you can do so via GitHub Sponsors.
-Sponsorships go directly to Zed Industries and are used as general company revenue.
-There are no perks or entitlements associated with sponsorship.
+License information for third-party dependencies must be correctly provided for CI to pass. The upstream project uses [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to help comply with open source license requirements.
