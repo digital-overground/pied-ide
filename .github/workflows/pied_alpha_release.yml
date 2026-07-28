@@ -106,6 +106,7 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
+      target_sha: ${{ steps.release.outputs.target_sha }}
       version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -131,6 +132,18 @@ jobs:
           target_sha="$(git rev-parse HEAD)"
           version="${TAG#pied-v}"
 
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+            if [[ "$existing_sha" != "$target_sha" ]]; then
+              echo "::error::Tag $TAG already points to $existing_sha, not $target_sha"
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$target_sha" >/dev/null
+          fi
+
           {
             echo "## Alpha Install"
             echo
@@ -153,13 +166,16 @@ jobs:
           } > release-notes.md
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md --draft --prerelease
+            gh release edit "$TAG" --tag "$TAG" --target "$target_sha" --title "$TAG" --notes-file release-notes.md --draft --prerelease
           else
-            gh release create "$TAG" --target "$target_sha" --draft --prerelease --title "$TAG" --notes-file release-notes.md
+            gh release create "$TAG" --verify-tag --draft --prerelease --title "$TAG" --notes-file release-notes.md
           fi
 
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "target_sha=$target_sha"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
 
   build_macos_aarch64:
     name: Build macOS aarch64
@@ -177,7 +193,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -217,7 +233,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -251,7 +267,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -285,7 +301,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
