@@ -86,8 +86,9 @@ release_download_base() {
     fi
 
     case "$version" in
-        v*) tag="$version" ;;
-        *) tag="v$version" ;;
+        pied-v*) tag="$version" ;;
+        v*) tag="pied-$version" ;;
+        *) tag="pied-v$version" ;;
     esac
 
     echo "https://github.com/$repo/releases/download/$tag"

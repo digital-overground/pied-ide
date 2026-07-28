@@ -3,11 +3,11 @@ name: Pied IDE Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'pied-v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to publish, such as v1.14.1'
+        description: 'Existing release tag to publish, such as pied-v1.0.0'
         required: true
         type: string
 
@@ -40,27 +40,27 @@ jobs:
             tag="$INPUT_TAG"
           fi
 
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
-            echo "::error::Release tags must look like v1.2.3, got $tag"
+          if [[ ! "$tag" =~ ^pied-v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "::error::Release tags must look like pied-v1.2.3, got $tag"
             exit 1
           fi
 
           git rev-parse "$tag" >/dev/null
 
           crate_version="$(script/get-crate-version zed)"
-          if [[ "$tag" != "v$crate_version" ]]; then
-            echo "::error::Tag $tag does not match crates/zed version v$crate_version"
+          if [[ "$tag" != "pied-v$crate_version" ]]; then
+            echo "::error::Tag $tag does not match crates/zed version pied-v$crate_version"
             exit 1
           fi
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#pied-v}" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
-          previous_tag="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+          previous_tag="$(git describe --tags --match 'pied-v*' --abbrev=0 "$TAG^" 2>/dev/null || true)"
           if [[ -n "$previous_tag" ]]; then
             range="$previous_tag..$TAG"
             changelog_url="https://github.com/$GITHUB_REPOSITORY/compare/$previous_tag...$TAG"

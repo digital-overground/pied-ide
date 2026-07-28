@@ -28,9 +28,9 @@ Windows users can download the installer from [GitHub Releases](https://github.c
 
 ## Releases and Updates
 
-Pied IDE uses its own semantic version stream. The app version lives in [crates/zed/Cargo.toml](./crates/zed/Cargo.toml), and release tags must match it as `vMAJOR.MINOR.PATCH`.
+Pied IDE uses its own semantic version stream. The app version lives in [crates/zed/Cargo.toml](./crates/zed/Cargo.toml), and release tags must match it as `pied-vMAJOR.MINOR.PATCH`.
 
-Publishing a tag such as `v1.0.0` runs the `Pied IDE Release` workflow, which builds macOS DMGs, Linux tarballs, the Windows installer, and remote-server assets, then uploads them to GitHub Releases.
+Publishing a tag such as `pied-v1.0.0` runs the `Pied IDE Release` workflow, which builds macOS DMGs, Linux tarballs, the Windows installer, and remote-server assets, then uploads them to GitHub Releases.
 
 The in-app updater checks [digital-overground/pied-ide releases](https://github.com/digital-overground/pied-ide/releases). Set `PIED_IDE_RELEASE_REPO=owner/repo` only when testing against another release repository.
 

@@ -48,6 +48,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const NIGHTLY_POLL_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const REMOTE_SERVER_CACHE_LIMIT: usize = 5;
 const PIED_IDE_RELEASE_REPO: &str = "digital-overground/pied-ide";
+const PIED_IDE_RELEASE_TAG_PREFIX: &str = "pied-v";
 const GITHUB_API_BASE_URL: &str = "https://api.github.com/repos";
 
 #[cfg(target_os = "linux")]
@@ -198,14 +199,20 @@ fn pied_ide_release_repo() -> String {
 }
 
 fn github_release_version(tag_name: &str) -> String {
-    tag_name.trim_start_matches('v').to_string()
+    tag_name
+        .strip_prefix(PIED_IDE_RELEASE_TAG_PREFIX)
+        .or_else(|| tag_name.strip_prefix('v'))
+        .unwrap_or(tag_name)
+        .to_string()
 }
 
 fn github_release_tag(version: &str) -> String {
-    if version.starts_with('v') {
+    if version.starts_with(PIED_IDE_RELEASE_TAG_PREFIX) {
         version.to_string()
+    } else if version.starts_with('v') {
+        format!("pied-{version}")
     } else {
-        format!("v{version}")
+        format!("{PIED_IDE_RELEASE_TAG_PREFIX}{version}")
     }
 }
 
