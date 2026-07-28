@@ -135,7 +135,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-          package-manager-cache: false
 
       - name: Install Linux dependencies
         run: ./script/linux
@@ -187,7 +186,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-          package-manager-cache: false
 
       - name: Build macOS bundle
         run: ./script/bundle-mac ${{ matrix.target }}
@@ -220,7 +218,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-          package-manager-cache: false
 
       - name: Build Windows installer
         shell: pwsh
