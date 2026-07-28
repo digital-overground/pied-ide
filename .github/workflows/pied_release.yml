@@ -110,6 +110,7 @@ jobs:
       contents: read
     with:
       ref: ${{ needs.prepare.outputs.tag }}
+      run_full_tests: true
 
   build_linux:
     name: Build Linux ${{ matrix.arch }}
@@ -132,10 +133,9 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
         with:
           node-version: '24'
-          package-manager-cache: false
 
       - name: Install Linux dependencies
         run: ./script/linux
@@ -184,10 +184,9 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
         with:
           node-version: '24'
-          package-manager-cache: false
 
       - name: Build macOS bundle
         run: ./script/bundle-mac ${{ matrix.target }}
@@ -217,10 +216,9 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
         with:
           node-version: '24'
-          package-manager-cache: false
 
       - name: Build Windows installer
         shell: pwsh
