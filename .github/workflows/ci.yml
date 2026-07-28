@@ -80,7 +80,7 @@ jobs:
             exit 0
           fi
 
-          if echo "$changed_files" | grep -qEv '^(README\.md|docs/|\.github/(workflows/|actions/|ISSUE_TEMPLATE/)|script/install\.sh|typos\.toml)$'; then
+          if echo "$changed_files" | grep -qEv '^(README\.md|docs/.*|\.github/(workflows/.*|actions/.*|ISSUE_TEMPLATE/.*)|script/install\.sh|typos\.toml)$'; then
             echo "Rust-relevant changes detected."
             if echo "$changed_files" | grep -qP '^(rust-toolchain\.toml|\.cargo/|Cargo\.(toml|lock)$)'; then
               echo "Root Cargo or toolchain configuration changed; running all tests."
