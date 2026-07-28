@@ -12,7 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pied-ide-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -22,13 +22,16 @@ jobs:
   prepare:
     name: Prepare release
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release tag
         id: release
@@ -124,13 +127,15 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Install Linux dependencies
         run: ./script/linux
@@ -138,13 +143,13 @@ jobs:
       - name: Build Linux bundle
         run: ./script/bundle-linux
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: zed-linux-${{ matrix.arch }}.tar.gz
           path: target/release/zed-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: zed-remote-server-linux-${{ matrix.arch }}.gz
           path: target/zed-remote-server-linux-${{ matrix.arch }}.gz
@@ -174,24 +179,26 @@ jobs:
             target: x86_64-apple-darwin
             runner: macos-26-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Build macOS bundle
         run: ./script/bundle-mac ${{ matrix.target }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: Zed-${{ matrix.arch }}.dmg
           path: target/${{ matrix.target }}/release/Zed-${{ matrix.arch }}.dmg
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: zed-remote-server-macos-${{ matrix.arch }}.gz
           path: target/zed-remote-server-macos-${{ matrix.arch }}.gz
@@ -205,25 +212,27 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Build Windows installer
         shell: pwsh
         run: script/bundle-windows.ps1 -Architecture x86_64
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: Zed-x86_64.exe
           path: target/Zed-x86_64.exe
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: zed-remote-server-windows-x86_64.zip
           path: target/zed-remote-server-windows-x86_64.zip
@@ -237,8 +246,10 @@ jobs:
       - build_macos
       - build_windows
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: release-artifacts
           merge-multiple: true
