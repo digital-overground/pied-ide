@@ -108,6 +108,11 @@ extend-ignore-re = [
     "composit",
     # Name of the screen-capture crate/module used by GPUI.
     "[Ss]cap",
+    # Upstream accepted spelling and intentionally partial Vim command fragments.
+    "writeable",
+    "elete",
+    # Intentional mixed-case test fixture content.
+    "Iz",
     # Used in truncating tests to ensure byte-length vs char like in café
     "caf…"
 ]

@@ -132,6 +132,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
+      # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
@@ -183,6 +184,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
+      # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
@@ -215,6 +217,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
+      # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
