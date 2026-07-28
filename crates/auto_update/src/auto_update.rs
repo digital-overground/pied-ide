@@ -230,9 +230,9 @@ fn github_release_api_url(version: &str) -> String {
 
 fn github_release_asset_name(asset: &str, os: &str, arch: &str) -> Result<String> {
     match (asset, os) {
-        ("zed", "macos") => Ok(format!("Zed-{arch}.dmg")),
+        ("zed", "macos") => Ok(format!("Pied-{arch}.dmg")),
         ("zed", "linux") => Ok(format!("zed-linux-{arch}.tar.gz")),
-        ("zed", "windows") => Ok(format!("Zed-{arch}.exe")),
+        ("zed", "windows") => Ok(format!("Pied-{arch}.exe")),
         ("zed-remote-server", "macos") => Ok(format!("zed-remote-server-macos-{arch}.gz")),
         ("zed-remote-server", "linux") => Ok(format!("zed-remote-server-linux-{arch}.gz")),
         ("zed-remote-server", "windows") => Ok(format!("zed-remote-server-windows-{arch}.zip")),
