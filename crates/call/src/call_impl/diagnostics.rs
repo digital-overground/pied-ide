@@ -1,4 +1,4 @@
-use gpui::{Context, Task, WeakEntity};
+use gpui::{Context, Entity, Task, WeakEntity};
 use livekit_client::{ConnectionQuality, RemoteAudioPlaybackStats};
 use serde::{Serialize, Serializer};
 use std::{
@@ -111,26 +111,29 @@ impl CallDiagnostics {
     }
 
     fn start_polling(&mut self, cx: &mut Context<Self>) {
+        let Some(room) = self.room.upgrade() else {
+            return;
+        };
         self.poll_task = Some(cx.spawn(async move |this, cx| {
             loop {
-                let poll_task = match this.update(cx, |this, cx| this.poll_stats(cx)) {
-                    Ok(Some(poll_task)) => poll_task,
-                    _ => break,
-                };
-                let result = poll_task.await;
-                if this
-                    .update(cx, |this, cx| this.apply_poll_result(result, cx))
-                    .is_err()
+                if let Some(poll_task) = this
+                    .update(cx, |this, cx| this.poll_stats(room.clone(), cx))
+                    .ok()
                 {
-                    break;
+                    let result = poll_task.await;
+                    if this
+                        .update(cx, |this, cx| this.apply_poll_result(result, cx))
+                        .is_err()
+                    {
+                        break;
+                    }
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
                 }
-                cx.background_executor().timer(Duration::from_secs(1)).await;
             }
         }));
     }
 
-    fn poll_stats(&mut self, cx: &mut Context<Self>) -> Option<Task<PollResult>> {
-        let room = self.room.upgrade()?;
+    fn poll_stats(&mut self, room: Entity<Room>, cx: &mut Context<Self>) -> Task<PollResult> {
         let connection_quality = room.read(cx).connection_quality();
         let input_lag = room.read(cx).input_lag().map(DurationDTO);
         let stats_future = room.read(cx).get_stats(cx);
@@ -163,7 +166,7 @@ impl CallDiagnostics {
 
         let previous_inbound = std::mem::take(&mut self.previous_inbound);
         let started_at = self.started_at;
-        Some(cx.background_executor().spawn(async move {
+        cx.background_executor().spawn(async move {
             let Some(session_stats) = stats_future.await else {
                 return PollResult {
                     snapshot: None,
@@ -193,7 +196,7 @@ impl CallDiagnostics {
                 }),
                 previous_inbound,
             }
-        }))
+        })
     }
 
     fn apply_poll_result(&mut self, result: PollResult, cx: &mut Context<Self>) {
@@ -202,10 +205,10 @@ impl CallDiagnostics {
             return;
         };
         self.stats = snapshot.stats.clone();
-        self.history.push_back(Arc::new(snapshot));
-        if self.history.len() > MAX_HISTORY_SAMPLES {
+        if self.history.len() + 1 > MAX_HISTORY_SAMPLES {
             self.history.pop_front();
         }
+        self.history.push_back(Arc::new(snapshot));
         cx.notify();
     }
 }
