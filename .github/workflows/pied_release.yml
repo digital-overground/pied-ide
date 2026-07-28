@@ -110,6 +110,7 @@ jobs:
       contents: read
     with:
       ref: ${{ needs.prepare.outputs.tag }}
+      run_full_tests: true
 
   build_linux:
     name: Build Linux ${{ matrix.arch }}
