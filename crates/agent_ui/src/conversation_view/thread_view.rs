@@ -2049,7 +2049,9 @@ impl ThreadView {
                 })
             });
 
-            if has_earlier_edits {
+            if has_earlier_edits
+                && !thread.read_with(cx, |thread, _| thread.truncate_preserves_edits())
+            {
                 thread.update(cx, |thread, cx| {
                     thread.action_log().update(cx, |action_log, cx| {
                         action_log.keep_all_edits(None, cx);
@@ -6152,9 +6154,11 @@ impl ThreadView {
                 } else {
                     self.agent_id.clone()
                 };
+                let hover_group = format!("user-message-{entry_ix}");
 
                 v_flex()
                     .id(("user_message", entry_ix))
+                    .group(&hover_group)
                     .map(|this| {
                         if is_first_indented {
                             this.pt_0p5()
@@ -6299,6 +6303,36 @@ impl ThreadView {
                                                 }))),
                                     )
                                 }
+                            })
+                            .when(!editor_focus && is_editable, |this| {
+                                this.child(
+                                    h_flex()
+                                        .absolute()
+                                        .top_neg_3p5()
+                                        .right_3()
+                                        .rounded_sm()
+                                        .border_1()
+                                        .border_color(cx.theme().colors().border)
+                                        .bg(cx.theme().colors().editor_background)
+                                        .visible_on_hover(&hover_group)
+                                        .child(
+                                            IconButton::new(
+                                                ("edit-from-message", entry_ix),
+                                                IconName::Pencil,
+                                            )
+                                            .icon_color(Color::Muted)
+                                            .icon_size(IconSize::XSmall)
+                                            .tooltip(Tooltip::text(
+                                                "Edit from here. Submitting rewinds Pi's conversation to this message.",
+                                            ))
+                                            .on_click({
+                                                let editor = editor.clone();
+                                                move |_, window, cx| {
+                                                    editor.focus_handle(cx).focus(window, cx);
+                                                }
+                                            }),
+                                        ),
+                                )
                             }),
                     )
                     .into_any()

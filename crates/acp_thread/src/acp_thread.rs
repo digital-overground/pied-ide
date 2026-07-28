@@ -2426,6 +2426,10 @@ impl AcpThread {
         self.connection.truncate(&self.session_id, cx).is_some()
     }
 
+    pub fn truncate_preserves_edits(&self) -> bool {
+        self.connection.truncate_preserves_edits()
+    }
+
     pub fn work_dirs(&self) -> Option<&PathList> {
         self.work_dirs.as_ref()
     }
@@ -2550,8 +2554,16 @@ impl AcpThread {
             acp::SessionUpdate::UserMessageChunk(acp::ContentChunk {
                 content,
                 message_id,
+                meta,
                 ..
             }) => {
+                let incoming_client_id = meta
+                    .as_ref()
+                    .and_then(|meta| meta.get("piAcp"))
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|pi_acp| pi_acp.get("clientMessageId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ClientUserMessageId::from_string);
                 // We optimistically add the full user prompt before calling `prompt`.
                 // Some ACP servers echo user chunks back over updates. Skip echoed
                 // chunks only when they match the local optimistic message.
@@ -2572,10 +2584,18 @@ impl AcpThread {
                         if already_in_user_message && message.protocol_id.is_none() {
                             message.protocol_id = message_id.clone();
                         }
+                        if already_in_user_message && message.client_id.is_none() {
+                            message.client_id = incoming_client_id.clone();
+                        }
                         already_in_user_message
                     });
                 if !already_in_user_message {
-                    self.push_user_content_block_from_agent(message_id, content, cx);
+                    self.push_user_content_block_from_agent(
+                        incoming_client_id,
+                        message_id,
+                        content,
+                        cx,
+                    );
                 }
             }
             acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk {
@@ -2677,11 +2697,12 @@ impl AcpThread {
 
     fn push_user_content_block_from_agent(
         &mut self,
+        client_id: Option<ClientUserMessageId>,
         id: Option<acp::MessageId>,
         chunk: acp::ContentBlock,
         cx: &mut Context<Self>,
     ) {
-        self.push_user_content_block_with_protocol_id(None, false, id, chunk, false, cx)
+        self.push_user_content_block_with_protocol_id(client_id, false, id, chunk, false, cx)
     }
 
     fn push_user_content_block_with_protocol_id(
@@ -4007,9 +4028,8 @@ impl AcpThread {
         })
     }
 
-    /// Rewinds this thread to before the entry at `index`, removing it and all
-    /// subsequent entries while rejecting any action_log changes made from that point.
-    /// Unlike `restore_checkpoint`, this method does not restore from git.
+    /// Rewinds this thread to before the selected user message and removes subsequent entries.
+    /// Connections may preserve edits when their native rewind only changes conversation context.
     pub fn rewind(
         &mut self,
         client_id: ClientUserMessageId,
@@ -4045,9 +4065,13 @@ impl AcpThread {
                         }
                     }
                 }
-                this.action_log().update(cx, |action_log, cx| {
-                    action_log.reject_all_edits(Some(telemetry), cx)
-                })
+                if this.connection.truncate_preserves_edits() {
+                    Task::ready(())
+                } else {
+                    this.action_log().update(cx, |action_log, cx| {
+                        action_log.reject_all_edits(Some(telemetry), cx)
+                    })
+                }
             })?
             .await;
             Ok(())
@@ -5609,6 +5633,51 @@ mod tests {
                 Some("msg_user_3")
             );
         });
+    }
+
+    #[gpui::test]
+    async fn test_user_message_chunk_restores_pi_acp_client_message_id(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let connection = Rc::new(FakeAgentConnection::new());
+        let thread = cx
+            .update(|cx| {
+                connection.new_session(project, PathList::new(&[Path::new(path!("/test"))]), cx)
+            })
+            .await
+            .unwrap();
+
+        let meta = acp::Meta::from_iter([(
+            "piAcp".into(),
+            serde_json::json!({ "clientMessageId": "pi-user-entry-1" }),
+        )]);
+        thread.update(cx, |thread, cx| {
+            thread
+                .handle_session_update(
+                    acp::SessionUpdate::UserMessageChunk(
+                        acp::ContentChunk::new("Restored prompt".into())
+                            .message_id("pi-user-entry-1")
+                            .meta(meta),
+                    ),
+                    cx,
+                )
+                .unwrap();
+        });
+
+        let client_id = thread.read_with(cx, |thread, _| {
+            let AgentThreadEntry::UserMessage(message) = &thread.entries[0] else {
+                panic!("expected restored user message");
+            };
+            message.client_id.clone()
+        });
+        assert_eq!(
+            client_id.as_ref().map(ClientUserMessageId::as_str),
+            Some("pi-user-entry-1")
+        );
     }
 
     #[gpui::test]

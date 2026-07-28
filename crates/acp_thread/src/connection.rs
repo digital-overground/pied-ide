@@ -21,6 +21,14 @@ impl ClientUserMessageId {
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string().into())
     }
+
+    pub fn from_string(id: impl Into<SharedString>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -214,6 +222,10 @@ pub trait AgentConnection {
         _cx: &App,
     ) -> Option<Rc<dyn AgentSessionTruncate>> {
         None
+    }
+
+    fn truncate_preserves_edits(&self) -> bool {
+        false
     }
 
     fn set_title(

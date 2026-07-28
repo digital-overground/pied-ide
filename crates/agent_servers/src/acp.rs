@@ -1,6 +1,7 @@
 use acp_thread::{
-    AgentConnection, AgentSessionInfo, AgentSessionList, AgentSessionListRequest,
-    AgentSessionListResponse, ElicitationStore,
+    AgentConnection, AgentSessionClientUserMessageIds, AgentSessionInfo, AgentSessionList,
+    AgentSessionListRequest, AgentSessionListResponse, AgentSessionTruncate, ClientUserMessageId,
+    ElicitationStore,
 };
 use action_log::ActionLog;
 use agent_client_protocol::schema::{
@@ -21,7 +22,7 @@ use project::agent_server_store::{
 };
 use project::{AgentId, Project};
 use remote::remote_client::Interactive;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use settings::{AgentConfigOptionValue, SettingsStore};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
@@ -45,6 +46,9 @@ use crate::{CURSOR_ID, GEMINI_ID};
 
 pub const GEMINI_TERMINAL_AUTH_METHOD_ID: &str = "spawn-gemini-cli";
 const PARAMETERIZED_MODEL_PICKER_META_KEY: &str = "parameterizedModelPicker";
+const PI_ACP_TREE_REWIND_CAPABILITY: &str = "pi-acp/tree-rewind";
+const PI_ACP_CLIENT_MESSAGE_ID_META: &str = "pi-acp/client-message-id";
+const PI_ACP_TREE_REWIND_METHOD: &str = "_pi-acp/session/rewind";
 const MAX_DEBUG_BACKLOG_MESSAGES: usize = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -413,6 +417,75 @@ pub struct AcpConnection {
     _dispatch_task: Task<()>,
     _wait_task: Task<Result<()>>,
     _stderr_task: Task<Result<()>>,
+}
+
+fn supports_pi_acp_tree_rewind(capabilities: &acp::AgentCapabilities) -> bool {
+    capabilities
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.get(PI_ACP_TREE_REWIND_CAPABILITY))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
+struct PiAcpClientUserMessageIds {
+    connection: ConnectionTo<Agent>,
+}
+
+impl AgentSessionClientUserMessageIds for PiAcpClientUserMessageIds {
+    fn prompt(
+        &self,
+        client_user_message_id: ClientUserMessageId,
+        mut params: acp::PromptRequest,
+        cx: &mut App,
+    ) -> Task<Result<acp::PromptResponse>> {
+        params.meta.get_or_insert_default().insert(
+            PI_ACP_CLIENT_MESSAGE_ID_META.into(),
+            client_user_message_id.as_str().into(),
+        );
+
+        let connection = self.connection.clone();
+        cx.foreground_executor()
+            .spawn(async move { Ok(connection.send_request(params).block_task().await?) })
+    }
+}
+
+struct PiAcpSessionTruncate {
+    connection: ConnectionTo<Agent>,
+    session_id: acp::SessionId,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PiAcpTreeRewindParams<'a> {
+    session_id: &'a acp::SessionId,
+    client_message_id: &'a str,
+}
+
+impl AgentSessionTruncate for PiAcpSessionTruncate {
+    fn run(&self, client_user_message_id: ClientUserMessageId, cx: &mut App) -> Task<Result<()>> {
+        let params = PiAcpTreeRewindParams {
+            session_id: &self.session_id,
+            client_message_id: client_user_message_id.as_str(),
+        };
+        let params = match serde_json::value::to_raw_value(&params) {
+            Ok(params) => Arc::from(params),
+            Err(error) => return Task::ready(Err(error.into())),
+        };
+        let request = acp::ClientRequest::ExtMethodRequest(acp::ExtRequest::new(
+            PI_ACP_TREE_REWIND_METHOD,
+            params,
+        ));
+        let connection = self.connection.clone();
+
+        cx.foreground_executor().spawn(async move {
+            let response = connection.send_request(request).block_task().await?;
+            if response.get("rewound").and_then(serde_json::Value::as_bool) != Some(true) {
+                anyhow::bail!("Pi did not confirm conversation rewind");
+            }
+            Ok(())
+        })
+    }
 }
 
 #[derive(Clone, Default)]
@@ -1998,6 +2071,34 @@ impl AgentConnection for AcpConnection {
         })
     }
 
+    fn client_user_message_ids(
+        &self,
+        _cx: &App,
+    ) -> Option<Rc<dyn AgentSessionClientUserMessageIds>> {
+        supports_pi_acp_tree_rewind(&self.agent_capabilities).then(|| {
+            Rc::new(PiAcpClientUserMessageIds {
+                connection: self.connection.clone(),
+            }) as Rc<dyn AgentSessionClientUserMessageIds>
+        })
+    }
+
+    fn truncate(
+        &self,
+        session_id: &acp::SessionId,
+        _cx: &App,
+    ) -> Option<Rc<dyn AgentSessionTruncate>> {
+        supports_pi_acp_tree_rewind(&self.agent_capabilities).then(|| {
+            Rc::new(PiAcpSessionTruncate {
+                connection: self.connection.clone(),
+                session_id: session_id.clone(),
+            }) as Rc<dyn AgentSessionTruncate>
+        })
+    }
+
+    fn truncate_preserves_edits(&self) -> bool {
+        supports_pi_acp_tree_rewind(&self.agent_capabilities)
+    }
+
     fn cancel(&self, session_id: &acp::SessionId, _cx: &mut App) {
         if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
             session.suppress_abort_err = true;
@@ -2357,6 +2458,10 @@ pub mod test_support {
             cx: &App,
         ) -> Option<Rc<dyn AgentSessionTruncate>> {
             self.inner.truncate(session_id, cx)
+        }
+
+        fn truncate_preserves_edits(&self) -> bool {
+            self.inner.truncate_preserves_edits()
         }
 
         fn set_title(
@@ -3025,6 +3130,18 @@ mod tests {
             .expect("expected client capabilities meta");
 
         assert!(!meta.contains_key(PARAMETERIZED_MODEL_PICKER_META_KEY));
+    }
+
+    #[test]
+    fn pi_acp_tree_rewind_requires_explicit_agent_capability() {
+        let unsupported = acp::AgentCapabilities::new();
+        assert!(!supports_pi_acp_tree_rewind(&unsupported));
+
+        let supported = acp::AgentCapabilities::new().meta(acp::Meta::from_iter([(
+            PI_ACP_TREE_REWIND_CAPABILITY.into(),
+            true.into(),
+        )]));
+        assert!(supports_pi_acp_tree_rewind(&supported));
     }
 
     #[test]

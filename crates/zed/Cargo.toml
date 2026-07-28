@@ -276,9 +276,9 @@ repl = { workspace = true, features = ["test-support"] }
 
 
 [package.metadata.bundle-dev]
-icon = ["resources/app-icon-dev@2x.png", "resources/app-icon-dev.png"]
+icon = ["resources/app-icon-pi@2x.png", "resources/app-icon-pi.png"]
 identifier = "dev.zed.Zed-Dev"
-name = "Zed Dev"
+name = "pied"
 osx_minimum_system_version = "10.15.7"
 osx_info_plist_exts = ["resources/info/*"]
 osx_url_schemes = ["zed"]
