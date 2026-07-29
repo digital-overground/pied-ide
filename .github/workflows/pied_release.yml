@@ -100,7 +100,7 @@ jobs:
             echo
             echo "## Changes"
             echo
-            git log --pretty=format:"- %s (%h)" "$range"
+            git log --max-count=100 --pretty=format:"- %s (%h)" "$range"
             echo
             echo
             echo "[Full Changelog]($changelog_url)"
