@@ -1,64 +1,47 @@
 # Pied IDE
 
-Pied IDE is Digital Overground's public fork of [Zed](https://github.com/zed-industries/zed). It tracks upstream Zed while publishing Pied builds and update metadata from [digital-overground/pied-ide](https://github.com/digital-overground/pied-ide).
-
-This fork keeps Zed's fast editor foundation and adds the release/update path needed for the Pied + Pi ACP setup. Some internal names, commands, and release asset filenames still use `zed` so the fork can continue merging upstream changes with less friction.
+Pied IDE is Digital Overground's public fork of [Zed](https://github.com/zed-industries/zed). It tracks upstream Zed while publishing a focused Pied build for macOS on Apple Silicon.
 
 ## Install
 
-Install the latest macOS or Linux release:
+Install the latest stable release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | sh
 ```
 
-Install a pinned version:
+Install a specific alpha or stable version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | ZED_VERSION=1.0.0 sh
+curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | PIED_VERSION=1.0.0-alpha.2 sh
 ```
 
-Windows users can download the installer from [GitHub Releases](https://github.com/digital-overground/pied-ide/releases). Current release asset names are:
+The installer downloads `Pied-aarch64.dmg`, installs `Pied.app` in `/Applications`, and makes the `pied` command available through `~/.local/bin`.
 
-- macOS Apple Silicon: `Zed-aarch64.dmg`
-- macOS Intel: `Zed-x86_64.dmg`
-- Linux ARM64: `zed-linux-aarch64.tar.gz`
-- Linux x86_64: `zed-linux-x86_64.tar.gz`
-- Windows x86_64: `Zed-x86_64.exe`
+## Releases And Updates
 
-## Releases and Updates
+Pied uses its own version stream. The app version lives in [crates/zed/Cargo.toml](./crates/zed/Cargo.toml), and stable tags must match it as `pied-vMAJOR.MINOR.PATCH`.
 
-Pied IDE uses its own semantic version stream. The app version lives in [crates/zed/Cargo.toml](./crates/zed/Cargo.toml), and release tags must match it as `pied-vMAJOR.MINOR.PATCH`.
+Use `Pied IDE Alpha Release` in GitHub Actions to create a prerelease from a branch or commit. It runs fast formatting, spelling, script, and workflow checks, then builds one Apple Silicon DMG. Cargo artifacts are cached so repeat builds avoid recompiling unchanged dependencies.
 
-Publishing a tag such as `pied-v1.0.0` runs the `Pied IDE Release` workflow, which builds macOS DMGs, Linux tarballs, the Windows installer, and remote-server assets, then uploads them to GitHub Releases.
-
-The in-app updater checks [digital-overground/pied-ide releases](https://github.com/digital-overground/pied-ide/releases). Set `PIED_IDE_RELEASE_REPO=owner/repo` only when testing against another release repository.
+Pushing a stable tag, such as `pied-v1.0.0`, runs `Pied IDE Release`. It publishes the latest GitHub release, which the installer and in-app updater use.
 
 ## Upstream
 
-This repository remains a GitHub fork of [zed-industries/zed](https://github.com/zed-industries/zed), so upstream Zed changes can be fetched and merged over time.
-
-The practical rule for this fork is to keep Pied-specific changes small, visible, and easy to reapply during upstream merges.
+This repository remains a GitHub fork of [zed-industries/zed](https://github.com/zed-industries/zed), so upstream changes can be fetched and merged over time. Pied-specific changes are intentionally concentrated in the release, installer, updater, and macOS bundle paths.
 
 ## Developing
 
-Most upstream Zed development documentation still applies:
-
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
-
-Useful local checks:
+The local macOS bundle command is:
 
 ```sh
-cargo fmt --all -- --check
-cargo check -p release_channel -p zed
+./script/bundle-mac aarch64-apple-darwin
 ```
 
-Pull requests and pushes to `main` run the `Pied CI` workflow. Release publishing also runs that CI workflow against the release tag before building or uploading release assets.
+It creates `target/aarch64-apple-darwin/release/Pied-aarch64.dmg`. The first build compiles the editor; later local builds reuse Cargo's normal incremental artifacts.
+
+Pull requests and pushes to `main` run `Pied CI`, the same fast checks used by releases. The inherited full Zed workspace suite is deliberately not part of the normal Pied development loop.
 
 ## License
 
-Pied IDE inherits Zed's licensing. Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.
-
-License information for third-party dependencies must be correctly provided for CI to pass. The upstream project uses [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to help comply with open source license requirements.
+Pied is a GPL-3.0-or-later fork of Zed. The source license and generated third-party dependency notices are retained in the build; no separate commercial license is required to build or use Pied.

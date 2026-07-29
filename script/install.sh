@@ -1,49 +1,31 @@
 #!/usr/bin/env sh
 set -eu
 
-# Downloads a Pied IDE release from GitHub and installs it.
+# Downloads a Pied IDE macOS Apple Silicon release from GitHub and installs it.
 
 main() {
     platform="$(uname -s)"
     arch="$(uname -m)"
     repo="${PIED_IDE_RELEASE_REPO:-digital-overground/pied-ide}"
-    channel="${ZED_CHANNEL:-dev}"
-    ZED_VERSION="${ZED_VERSION:-latest}"
-    # Use TMPDIR if available (for environments with non-standard temp directories)
-    if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
-        temp="$(mktemp -d "$TMPDIR/zed-XXXXXX")"
-    else
-        temp="$(mktemp -d "/tmp/zed-XXXXXX")"
-    fi
+    PIED_VERSION="${PIED_VERSION:-${ZED_VERSION:-latest}}"
 
-    if [ "$platform" = "Darwin" ]; then
-        platform="macos"
-    elif [ "$platform" = "Linux" ]; then
-        platform="linux"
-    else
-        echo "Unsupported platform $platform"
+    if [ "$platform" != "Darwin" ] || [ "$arch" != "arm64" ]; then
+        echo "Pied IDE currently supports macOS on Apple Silicon only."
         exit 1
     fi
 
-    case "$platform-$arch" in
-        macos-arm64* | linux-arm64* | linux-armhf | linux-aarch64)
-            arch="aarch64"
-            ;;
-        macos-x86* | linux-x86* | linux-i686*)
-            arch="x86_64"
-            ;;
-        *)
-            echo "Unsupported platform or architecture"
-            exit 1
-            ;;
-    esac
+    if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
+        temp="$(mktemp -d "$TMPDIR/pied-XXXXXX")"
+    else
+        temp="$(mktemp -d "/tmp/pied-XXXXXX")"
+    fi
 
     if command -v curl >/dev/null 2>&1; then
-        curl () {
+        curl() {
             command curl -fL "$@"
         }
     elif command -v wget >/dev/null 2>&1; then
-        curl () {
+        curl() {
             wget -O- "$@"
         }
     else
@@ -51,13 +33,12 @@ main() {
         exit 1
     fi
 
-    "$platform" "$@"
+    macos
 
-    if [ "$(command -v zed)" = "$HOME/.local/bin/zed" ]; then
-        echo "Pied IDE has been installed. Run with 'zed'"
+    if [ "$(command -v pied)" = "$HOME/.local/bin/pied" ]; then
+        echo "Pied IDE has been installed. Run with 'pied'"
     else
-        echo "To run Pied IDE from your terminal, you must add ~/.local/bin to your PATH"
-        echo "Run:"
+        echo "To run Pied IDE from your terminal, add ~/.local/bin to your PATH"
 
         case "$SHELL" in
             *zsh)
@@ -73,7 +54,7 @@ main() {
                 ;;
         esac
 
-        echo "To run Pied IDE now, '~/.local/bin/zed'"
+        echo "To run Pied IDE now, '~/.local/bin/pied'"
     fi
 }
 
@@ -94,84 +75,29 @@ release_download_base() {
     echo "https://github.com/$repo/releases/download/$tag"
 }
 
-linux() {
-    if [ -n "${ZED_BUNDLE_PATH:-}" ]; then
-        cp "$ZED_BUNDLE_PATH" "$temp/zed-linux-$arch.tar.gz"
-    else
-        echo "Downloading Pied IDE version: $ZED_VERSION"
-        curl "$(release_download_base "$ZED_VERSION")/zed-linux-$arch.tar.gz" > "$temp/zed-linux-$arch.tar.gz"
-    fi
-
-    suffix=""
-    if [ "$channel" != "stable" ]; then
-        suffix="-$channel"
-    fi
-
-    appid=""
-    case "$channel" in
-      stable)
-        appid="dev.zed.Zed"
-        ;;
-      nightly)
-        appid="dev.zed.Zed-Nightly"
-        ;;
-      preview)
-        appid="dev.zed.Zed-Preview"
-        ;;
-      dev)
-        appid="dev.zed.Zed-Dev"
-        ;;
-      *)
-        echo "Unknown release channel: ${channel}. Using stable app ID."
-        appid="dev.zed.Zed"
-        ;;
-    esac
-
-    # Unpack
-    rm -rf "$HOME/.local/zed$suffix.app"
-    mkdir -p "$HOME/.local/zed$suffix.app"
-    tar -xzf "$temp/zed-linux-$arch.tar.gz" -C "$HOME/.local/"
-
-    # Setup ~/.local directories
-    mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
-
-    # Link the binary
-    if [ -f "$HOME/.local/zed$suffix.app/bin/zed" ]; then
-        ln -sf "$HOME/.local/zed$suffix.app/bin/zed" "$HOME/.local/bin/zed"
-    else
-        # support for versions before 0.139.x.
-        ln -sf "$HOME/.local/zed$suffix.app/bin/cli" "$HOME/.local/bin/zed"
-    fi
-
-    # Copy .desktop file
-    desktop_file_path="$HOME/.local/share/applications/${appid}.desktop"
-    src_dir="$HOME/.local/zed$suffix.app/share/applications"
-    if [ -f "$src_dir/${appid}.desktop" ]; then
-        cp "$src_dir/${appid}.desktop" "${desktop_file_path}"
-    else
-        # Fallback for older tarballs
-        cp "$src_dir/zed$suffix.desktop" "${desktop_file_path}"
-    fi
-    sed -i "s|Icon=zed|Icon=$HOME/.local/zed$suffix.app/share/icons/hicolor/512x512/apps/zed.png|g" "${desktop_file_path}"
-    sed -i "s|Exec=zed|Exec=$HOME/.local/zed$suffix.app/bin/zed|g" "${desktop_file_path}"
-}
-
 macos() {
-    echo "Downloading Pied IDE version: $ZED_VERSION"
-    curl "$(release_download_base "$ZED_VERSION")/Pied-$arch.dmg" > "$temp/Pied-$arch.dmg"
-    hdiutil attach -quiet "$temp/Pied-$arch.dmg" -mountpoint "$temp/mount"
-    app="$(cd "$temp/mount/"; echo *.app)"
-    echo "Installing $app"
-    if [ -d "/Applications/$app" ]; then
-        echo "Removing existing $app"
-        rm -rf "/Applications/$app"
+    echo "Downloading Pied IDE version: $PIED_VERSION"
+    curl "$(release_download_base "$PIED_VERSION")/Pied-aarch64.dmg" > "$temp/Pied-aarch64.dmg"
+    mkdir -p "$temp/mount"
+    hdiutil attach -quiet "$temp/Pied-aarch64.dmg" -mountpoint "$temp/mount"
+    app="$temp/mount/Pied.app"
+
+    if [ ! -d "$app" ]; then
+        echo "The release DMG does not contain Pied.app"
+        hdiutil detach -quiet "$temp/mount"
+        exit 1
     fi
-    ditto "$temp/mount/$app" "/Applications/$app"
+
+    echo "Installing Pied.app"
+    if [ -d "/Applications/Pied.app" ]; then
+        echo "Removing existing Pied.app"
+        rm -rf "/Applications/Pied.app"
+    fi
+    ditto "$app" "/Applications/Pied.app"
     hdiutil detach -quiet "$temp/mount"
 
     mkdir -p "$HOME/.local/bin"
-    # Link the binary
-    ln -sf "/Applications/$app/Contents/MacOS/cli" "$HOME/.local/bin/zed"
+    ln -sf "/Applications/Pied.app/Contents/MacOS/cli" "$HOME/.local/bin/pied"
 }
 
 main "$@"
