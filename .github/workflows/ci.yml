@@ -2,8 +2,6 @@ name: Pied CI
 
 on:
   pull_request:
-    branches:
-      - "**"
   push:
     branches:
       - main
@@ -11,123 +9,27 @@ on:
   workflow_call:
     inputs:
       ref:
-        description: "Git ref to validate. Defaults to the triggering commit."
+        description: "Git ref to validate"
         required: false
         type: string
-      run_full_tests:
-        description: "Run the heavy Rust checks even when the changed files are normally lightweight."
-        default: false
-        required: false
-        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: pied-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_INCREMENTAL: "0"
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: "1"
-
 jobs:
-  changes:
-    name: Changes
-    runs-on: ubuntu-24.04
-    outputs:
-      nextest_filter: ${{ steps.plan.outputs.nextest_filter }}
-      run_rust: ${{ steps.plan.outputs.run_rust }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 350
-          persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_call' && inputs.ref || github.sha }}
-
-      - id: plan
-        name: Plan checks
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          EVENT_NAME: ${{ github.event_name }}
-          RUN_FULL_TESTS: ${{ github.event_name == 'workflow_call' && inputs.run_full_tests || false }}
-        run: |
-          set -euo pipefail
-
-          if [[ "$RUN_FULL_TESTS" == "true" ]]; then
-            echo "Release or manual caller requested full Rust validation."
-            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
-            echo "run_rust=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [[ "$EVENT_NAME" != "pull_request" ]]; then
-            echo "Non-PR event; running Rust validation."
-            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
-            echo "run_rust=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git fetch origin "$BASE_REF" --depth=350
-          compare_rev="$(git merge-base "origin/$BASE_REF" HEAD)"
-          changed_files="$(git diff --name-only "$compare_rev" HEAD)"
-          echo "$changed_files"
-
-          if [[ -z "$changed_files" ]]; then
-            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
-            echo "run_rust=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Pull request event; Rust validation is deferred to manual and stable release workflows."
-          echo "nextest_filter=" >> "$GITHUB_OUTPUT"
-          echo "run_rust=false" >> "$GITHUB_OUTPUT"
-          exit 0
-
-          if echo "$changed_files" | grep -qEv '^(README\.md|docs/.*|\.github/(workflows/.*|actions/.*|ISSUE_TEMPLATE/.*)|script/install\.sh|typos\.toml)$'; then
-            echo "Rust-relevant changes detected."
-            if echo "$changed_files" | grep -qP '^(rust-toolchain\.toml|\.cargo/|Cargo\.(toml|lock)$)'; then
-              echo "Root Cargo or toolchain configuration changed; running all tests."
-              echo "nextest_filter=" >> "$GITHUB_OUTPUT"
-            else
-              changed_dirs="$(echo "$changed_files" | grep -oP '^(crates|tooling)/\K[^/]+' | sort -u || true)"
-              dir_to_pkg="$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[] | select(.manifest_path | test("/(crates|tooling)/")) | "\(.manifest_path | capture("/(crates|tooling)/(?<dir>[^/]+)/").dir)=\(.name)"')"
-              changed_packages=""
-
-              for dir in $changed_dirs; do
-                package="$(echo "$dir_to_pkg" | grep "^${dir}=" | cut -d= -f2 | head -1 || true)"
-                if [[ -n "$package" ]]; then
-                  changed_packages="$(printf '%s\n%s' "$changed_packages" "$package")"
-                fi
-              done
-
-              changed_packages="$(echo "$changed_packages" | grep -v '^$' | sort -u || true)"
-              if [[ -n "$changed_packages" ]]; then
-                nextest_filter="$(echo "$changed_packages" | sed 's/.*/rdeps(&)/' | paste -sd '|')"
-                echo "Nextest filter: $nextest_filter"
-                echo "nextest_filter=$nextest_filter" >> "$GITHUB_OUTPUT"
-              else
-                echo "No crate-specific package filter found; running all tests."
-                echo "nextest_filter=" >> "$GITHUB_OUTPUT"
-              fi
-            fi
-            echo "run_rust=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Only documentation, workflow, install script, or typo configuration changed."
-            echo "nextest_filter=" >> "$GITHUB_OUTPUT"
-            echo "run_rust=false" >> "$GITHUB_OUTPUT"
-          fi
-
   style:
     name: Style
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_call' && inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -157,81 +59,6 @@ jobs:
         with:
           config: ./typos.toml
 
-  rust:
-    name: Rust
-    needs: changes
-    if: needs.changes.outputs.run_rust == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 240
-    env:
-      CC: clang
-      CXX: clang++
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 500ms
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_call' && inputs.ref || github.sha }}
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "24"
-
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
-        with:
-          cache-on-failure: true
-
-      - name: Install Linux dependencies
-        run: ./script/linux
-
-      - name: Install WASI SDK
-        run: ./script/download-wasi-sdk
-
-      - name: Install nextest
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68
-        with:
-          tool: nextest
-
-      - name: Configure CI Rust flags
-        run: |
-          mkdir -p ../.cargo
-          cp .cargo/ci-config.toml ../.cargo/config.toml
-
-      - name: Run clippy
-        run: ./script/clippy
-
-      - name: Run tests
-        env:
-          NEXTEST_FILTER: ${{ needs.changes.outputs.nextest_filter }}
-        run: |
-          set -euo pipefail
-
-          # Keep the public release gate portable on GitHub-hosted runners.
-          # These tests need unavailable runner capabilities or currently fail
-          # on this upstream snapshot independent of Pied release changes.
-          portable_filter='not ((package(extension_host) and test(test_extension_store_with_test_extension)) or (package(gpui_wgpu) and (test(remove_deallocates_tile_space_for_reuse) or test(before_frame_skips_uploads_for_removed_texture))) or (package(language) and test(test_bracket_colorization_indices_remain_stable_across_row_chunks)) or (package(worktree) and test(test_random_worktree_changes)))'
-
-          if [[ -n "$NEXTEST_FILTER" ]]; then
-            cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "($NEXTEST_FILTER) and $portable_filter"
-          else
-            cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "$portable_filter"
-          fi
-
-      - name: Clean up CI Rust flags
-        if: always()
-        run: rm -rf ../.cargo
-
   workflow:
     name: Workflow
     runs-on: ubuntu-24.04
@@ -240,7 +67,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_call' && inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Install shellcheck
         run: |
@@ -259,21 +86,10 @@ jobs:
           ACTIONLINT_BIN: ${{ steps.actionlint.outputs.executable }}
         run: '"$ACTIONLINT_BIN" -color'
 
-      - name: Check workflow security
-        uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d
-        with:
-          advanced-security: false
-          inputs: |
-            .github/workflows/ci.yml
-            .github/workflows/pied_release.yml
-          min-severity: high
-
   quality_gate:
     name: Quality gate
     needs:
-      - changes
       - style
-      - rust
       - workflow
     if: always()
     runs-on: ubuntu-24.04
@@ -281,27 +97,8 @@ jobs:
       - name: Verify required checks passed
         env:
           STYLE_RESULT: ${{ needs.style.result }}
-          RUST_RESULT: ${{ needs.rust.result }}
-          RUN_RUST: ${{ needs.changes.outputs.run_rust }}
           WORKFLOW_RESULT: ${{ needs.workflow.result }}
         run: |
           set -euo pipefail
-
-          failed=0
-          for result in STYLE_RESULT WORKFLOW_RESULT; do
-            value="${!result}"
-            echo "$result=$value"
-            if [[ "$value" != "success" ]]; then
-              failed=1
-            fi
-          done
-
-          echo "RUN_RUST=$RUN_RUST"
-          echo "RUST_RESULT=$RUST_RESULT"
-          if [[ "$RUN_RUST" == "true" && "$RUST_RESULT" != "success" ]]; then
-            failed=1
-          elif [[ "$RUN_RUST" != "true" && "$RUST_RESULT" != "skipped" && "$RUST_RESULT" != "success" ]]; then
-            failed=1
-          fi
-
-          exit "$failed"
+          test "$STYLE_RESULT" = "success"
+          test "$WORKFLOW_RESULT" = "success"

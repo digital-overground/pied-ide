@@ -4,98 +4,29 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Alpha release tag to publish, such as pied-v1.0.0-alpha.1"
+        description: "Alpha release tag, such as pied-v1.0.0-alpha.1"
         default: "pied-v1.0.0-alpha.1"
         required: true
         type: string
       ref:
-        description: "Git ref to build."
+        description: "Git ref to build"
         default: "main"
         required: true
         type: string
-      build_macos_aarch64:
-        description: "Build Apple Silicon macOS DMG."
-        default: true
-        required: true
-        type: boolean
-      build_macos_x86_64:
-        description: "Build Intel macOS DMG."
-        default: false
-        required: true
-        type: boolean
-      build_linux_x86_64:
-        description: "Build Linux x86_64 tarball."
-        default: false
-        required: true
-        type: boolean
-      build_windows_x86_64:
-        description: "Build Windows x86_64 installer."
-        default: false
-        required: true
-        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: pied-ide-alpha-release-${{ inputs.tag }}
+  group: pied-alpha-release-${{ inputs.tag }}
   cancel-in-progress: true
 
 jobs:
   quick_checks:
     name: Quick checks
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.ref }}
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "24"
-
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-        with:
-          version: "9"
-
-      - name: Install Rust toolchain
-        run: rustup show
-
-      - name: Check Prettier formatting
-        run: ./script/prettier
-
-      - name: Check Rust formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check tracked TODO markers
-        run: ./script/check-todos
-
-      - name: Check keymaps
-        run: ./script/check-keymaps
-
-      - name: Check typos
-        uses: crate-ci/typos@96d9af6217dc2855210655af7e1ff19d23d4e593
-        with:
-          config: ./typos.toml
-
-      - name: Install shellcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-
-      - name: Check install script
-        run: shellcheck script/install.sh
-
-      - name: Install actionlint
-        run: |
-          temp_dir="$(mktemp -d)"
-          curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash -s -- latest "$temp_dir"
-          echo "$temp_dir" >> "$GITHUB_PATH"
-
-      - name: Check workflows
-        run: actionlint .github/workflows/ci.yml .github/workflows/pied_release.yml .github/workflows/pied_alpha_release.yml
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.ref }}
 
   prepare:
     name: Prepare alpha release
@@ -147,22 +78,16 @@ jobs:
           {
             echo "## Alpha Install"
             echo
-            echo "macOS and Linux:"
-            echo
             echo '```sh'
-            echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/script/install.sh | ZED_VERSION=$version sh"
+            echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/script/install.sh | PIED_VERSION=$version sh"
             echo '```'
-            echo
-            echo "Windows: download the \`Pied-x86_64.exe\` installer below when that build option is enabled."
             echo
             echo "## Build"
             echo
             echo "- Ref: \`$BUILD_REF\`"
             echo "- Commit: \`$target_sha\`"
             echo
-            echo "## Notes"
-            echo
-            echo "This is a fast alpha build. It runs formatting, script, workflow, and typo checks, but skips clippy and the full workspace test suite."
+            echo "This prerelease supports macOS Apple Silicon only. It runs fast validation and skips the full workspace test suite."
           } > release-notes.md
 
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -178,17 +103,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   build_macos_aarch64:
-    name: Build macOS aarch64
+    name: Build macOS Apple Silicon
     needs: prepare
-    if: inputs.build_macos_aarch64
     runs-on: macos-26
-    timeout-minutes: 360
-    env:
-      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
-      APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
-      APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -199,11 +117,10 @@ jobs:
         with:
           node-version: "24"
 
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+
       - name: Build macOS bundle
         run: ./script/bundle-mac aarch64-apple-darwin
-
-      - name: Rename macOS installer
-        run: mv target/aarch64-apple-darwin/release/Zed-aarch64.dmg target/aarch64-apple-darwin/release/Pied-aarch64.dmg
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -217,133 +134,11 @@ jobs:
           path: target/zed-remote-server-macos-aarch64.gz
           if-no-files-found: error
 
-  build_macos_x86_64:
-    name: Build macOS x86_64
-    needs: prepare
-    if: inputs.build_macos_x86_64
-    runs-on: macos-26-intel
-    timeout-minutes: 360
-    env:
-      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
-      APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
-      APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.target_sha }}
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "24"
-
-      - name: Build macOS bundle
-        run: ./script/bundle-mac x86_64-apple-darwin
-
-      - name: Rename macOS installer
-        run: mv target/x86_64-apple-darwin/release/Zed-x86_64.dmg target/x86_64-apple-darwin/release/Pied-x86_64.dmg
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: Pied-x86_64.dmg
-          path: target/x86_64-apple-darwin/release/Pied-x86_64.dmg
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: zed-remote-server-macos-x86_64.gz
-          path: target/zed-remote-server-macos-x86_64.gz
-          if-no-files-found: error
-
-  build_linux_x86_64:
-    name: Build Linux x86_64
-    needs: prepare
-    if: inputs.build_linux_x86_64
-    runs-on: ubuntu-24.04
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.target_sha }}
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "24"
-
-      - name: Install Linux dependencies
-        run: ./script/linux
-
-      - name: Build Linux bundle
-        run: ./script/bundle-linux
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: zed-linux-x86_64.tar.gz
-          path: target/release/zed-linux-x86_64.tar.gz
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: zed-remote-server-linux-x86_64.gz
-          path: target/zed-remote-server-linux-x86_64.gz
-          if-no-files-found: error
-
-  build_windows_x86_64:
-    name: Build Windows x86_64
-    needs: prepare
-    if: inputs.build_windows_x86_64
-    runs-on: windows-2022
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.target_sha }}
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "24"
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: script/bundle-windows.ps1 -Architecture x86_64
-
-      - name: Rename Windows installer
-        shell: pwsh
-        run: Move-Item -Path target/Zed-x86_64.exe -Destination target/Pied-x86_64.exe -Force
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: Pied-x86_64.exe
-          path: target/Pied-x86_64.exe
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: zed-remote-server-windows-x86_64.zip
-          path: target/zed-remote-server-windows-x86_64.zip
-          if-no-files-found: error
-
   publish:
     name: Publish alpha release
     needs:
       - prepare
       - build_macos_aarch64
-      - build_macos_x86_64
-      - build_linux_x86_64
-      - build_windows_x86_64
-    if: |
-      always()
-      && needs.prepare.result == 'success'
-      && (
-        needs.build_macos_aarch64.result == 'success'
-        || needs.build_macos_x86_64.result == 'success'
-        || needs.build_linux_x86_64.result == 'success'
-        || needs.build_windows_x86_64.result == 'success'
-      )
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -360,6 +155,5 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          find release-artifacts -maxdepth 1 -type f -print -exec ls -lh {} \;
           gh release upload "$TAG" release-artifacts/* --clobber
           gh release edit "$TAG" --draft=false --prerelease

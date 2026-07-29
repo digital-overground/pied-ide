@@ -3,11 +3,12 @@ name: Pied IDE Release
 on:
   push:
     tags:
-      - 'pied-v*'
+      - "pied-v*"
+      - "!pied-v*-alpha.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to publish, such as pied-v1.0.0'
+        description: "Existing stable release tag, such as pied-v1.0.0"
         required: true
         type: string
 
@@ -15,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pied-ide-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: pied-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -26,7 +27,7 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
-      version: ${{ steps.release.outputs.version }}
+      target_sha: ${{ steps.release.outputs.target_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -38,18 +39,19 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
+
           tag="$GITHUB_REF_NAME"
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             tag="$INPUT_TAG"
           fi
 
-          if [[ ! "$tag" =~ ^pied-v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
-            echo "::error::Release tags must look like pied-v1.2.3, got $tag"
+          if [[ ! "$tag" =~ ^pied-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Stable release tags must look like pied-v1.2.3, got $tag"
             exit 1
           fi
 
           git rev-parse "$tag" >/dev/null
-
           crate_version="$(script/get-crate-version zed)"
           if [[ "$tag" != "pied-v$crate_version" ]]; then
             echo "::error::Tag $tag does not match crates/zed version pied-v$crate_version"
@@ -57,13 +59,13 @@ jobs:
           fi
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#pied-v}" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$(git rev-parse "$tag^{commit}")" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
-          previous_tag="$(git describe --tags --match 'pied-v*' --abbrev=0 "$TAG^" 2>/dev/null || true)"
+          previous_tag="$(git describe --tags --match 'pied-v*' --exclude '*-alpha.*' --abbrev=0 "$TAG^" 2>/dev/null || true)"
           if [[ -n "$previous_tag" ]]; then
             range="$previous_tag..$TAG"
             changelog_url="https://github.com/$GITHUB_REPOSITORY/compare/$previous_tag...$TAG"
@@ -75,13 +77,9 @@ jobs:
           {
             echo "## Install"
             echo
-            echo "macOS and Linux:"
-            echo
             echo '```sh'
             echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/script/install.sh | sh"
             echo '```'
-            echo
-            echo "Windows: download the \`Pied-x86_64.exe\` installer below."
             echo
             echo "## Changes"
             echo
@@ -93,11 +91,11 @@ jobs:
 
       - name: Create or update draft release
         env:
-          TAG: ${{ steps.release.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md
+            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md --draft
           else
             gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file release-notes.md
           fi
@@ -106,151 +104,50 @@ jobs:
     name: Quality gate
     needs: prepare
     uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
     with:
-      ref: ${{ needs.prepare.outputs.tag }}
-      run_full_tests: true
+      ref: ${{ needs.prepare.outputs.target_sha }}
 
-  build_linux:
-    name: Build Linux ${{ matrix.arch }}
+  build_macos_aarch64:
+    name: Build macOS Apple Silicon
     needs:
       - prepare
       - quality_gate
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-24.04
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
+    runs-on: macos-26
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
+          node-version: "24"
 
-      - name: Install Linux dependencies
-        run: ./script/linux
-
-      - name: Build Linux bundle
-        run: ./script/bundle-linux
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: zed-linux-${{ matrix.arch }}.tar.gz
-          path: target/release/zed-linux-${{ matrix.arch }}.tar.gz
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: zed-remote-server-linux-${{ matrix.arch }}.gz
-          path: target/zed-remote-server-linux-${{ matrix.arch }}.gz
-          if-no-files-found: error
-
-  build_macos:
-    name: Build macOS ${{ matrix.arch }}
-    needs:
-      - prepare
-      - quality_gate
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 360
-    env:
-      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
-      APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
-      APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            target: aarch64-apple-darwin
-            runner: macos-26
-          - arch: x86_64
-            target: x86_64-apple-darwin
-            runner: macos-26-intel
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.tag }}
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
-        with:
-          node-version: '24'
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
 
       - name: Build macOS bundle
-        run: ./script/bundle-mac ${{ matrix.target }}
-
-      - name: Rename macOS installer
-        run: mv target/${{ matrix.target }}/release/Zed-${{ matrix.arch }}.dmg target/${{ matrix.target }}/release/Pied-${{ matrix.arch }}.dmg
+        run: ./script/bundle-mac aarch64-apple-darwin
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Pied-${{ matrix.arch }}.dmg
-          path: target/${{ matrix.target }}/release/Pied-${{ matrix.arch }}.dmg
+          name: Pied-aarch64.dmg
+          path: target/aarch64-apple-darwin/release/Pied-aarch64.dmg
           if-no-files-found: error
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: zed-remote-server-macos-${{ matrix.arch }}.gz
-          path: target/zed-remote-server-macos-${{ matrix.arch }}.gz
-          if-no-files-found: error
-
-  build_windows:
-    name: Build Windows x86_64
-    needs:
-      - prepare
-      - quality_gate
-    runs-on: windows-2022
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.tag }}
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # zizmor: ignore[cache-poisoning] setup-node is used without package caching before release artifact builds.
-        with:
-          node-version: '24'
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: script/bundle-windows.ps1 -Architecture x86_64
-
-      - name: Rename Windows installer
-        shell: pwsh
-        run: Move-Item -Path target/Zed-x86_64.exe -Destination target/Pied-x86_64.exe -Force
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: Pied-x86_64.exe
-          path: target/Pied-x86_64.exe
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: zed-remote-server-windows-x86_64.zip
-          path: target/zed-remote-server-windows-x86_64.zip
+          name: zed-remote-server-macos-aarch64.gz
+          path: target/zed-remote-server-macos-aarch64.gz
           if-no-files-found: error
 
   publish:
     name: Publish GitHub release
     needs:
       - prepare
-      - build_linux
-      - build_macos
-      - build_windows
+      - build_macos_aarch64
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -261,9 +158,9 @@ jobs:
 
       - name: Upload release assets
         env:
-          TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          find release-artifacts -maxdepth 1 -type f -print -exec ls -lh {} \;
+          set -euo pipefail
           gh release upload "$TAG" release-artifacts/* --clobber
           gh release edit "$TAG" --draft=false
