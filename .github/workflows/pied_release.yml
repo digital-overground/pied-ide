@@ -1,14 +1,16 @@
 name: Pied IDE Release
 
 on:
-  push:
-    tags:
-      - "pied-v*"
-      - "!pied-v*-alpha.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing stable release tag, such as pied-v1.0.0"
+        description: "Release tag matching crates/zed/Cargo.toml, such as pied-v1.0.0"
+        default: "pied-v1.0.0"
+        required: true
+        type: string
+      ref:
+        description: "Git ref to build"
+        default: "main"
         required: true
         type: string
 
@@ -16,13 +18,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: pied-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-  cancel-in-progress: false
+  group: pied-release-${{ inputs.tag }}
+  cancel-in-progress: true
 
 jobs:
+  quick_checks:
+    name: Quick checks
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.ref }}
+
   prepare:
     name: Prepare release
+    needs: quick_checks
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     outputs:
@@ -33,39 +43,42 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ inputs.ref }}
 
-      - name: Resolve release tag
+      - name: Create or update draft release
         id: release
         env:
-          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          BUILD_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
 
-          tag="$GITHUB_REF_NAME"
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            tag="$INPUT_TAG"
-          fi
-
-          if [[ ! "$tag" =~ ^pied-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Stable release tags must look like pied-v1.2.3, got $tag"
+          if [[ ! "$TAG" =~ ^pied-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must look like pied-v1.0.0, got $TAG"
             exit 1
           fi
 
-          git rev-parse "$tag" >/dev/null
+          target_sha="$(git rev-parse HEAD)"
           crate_version="$(script/get-crate-version zed)"
-          if [[ "$tag" != "pied-v$crate_version" ]]; then
-            echo "::error::Tag $tag does not match crates/zed version pied-v$crate_version"
+          if [[ "$TAG" != "pied-v$crate_version" ]]; then
+            echo "::error::Tag $TAG does not match crates/zed version pied-v$crate_version"
             exit 1
           fi
 
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "target_sha=$(git rev-parse "$tag^{commit}")" >> "$GITHUB_OUTPUT"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+            if [[ "$existing_sha" != "$target_sha" ]]; then
+              echo "::error::Tag $TAG already points to $existing_sha, not $target_sha"
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$target_sha" >/dev/null
+          fi
 
-      - name: Generate release notes
-        env:
-          TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          previous_tag="$(git describe --tags --match 'pied-v*' --exclude '*-alpha.*' --abbrev=0 "$TAG^" 2>/dev/null || true)"
+          previous_tag="$(git tag --merged "$target_sha^" --list 'pied-v*' --sort=-v:refname | grep -E '^pied-v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
           if [[ -n "$previous_tag" ]]; then
             range="$previous_tag..$TAG"
             changelog_url="https://github.com/$GITHUB_REPOSITORY/compare/$previous_tag...$TAG"
@@ -81,6 +94,11 @@ jobs:
             echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/script/install.sh | sh"
             echo '```'
             echo
+            echo "## Build"
+            echo
+            echo "- Ref: \`$BUILD_REF\`"
+            echo "- Commit: \`$target_sha\`"
+            echo
             echo "## Changes"
             echo
             git log --pretty=format:"- %s (%h)" "$range"
@@ -89,29 +107,20 @@ jobs:
             echo "[Full Changelog]($changelog_url)"
           } > release-notes.md
 
-      - name: Create or update draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md --draft
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file release-notes.md
           else
-            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file release-notes.md
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$TAG" --notes-file release-notes.md
           fi
 
-  quality_gate:
-    name: Quality gate
-    needs: prepare
-    uses: ./.github/workflows/ci.yml
-    with:
-      ref: ${{ needs.prepare.outputs.target_sha }}
+          {
+            echo "tag=$TAG"
+            echo "target_sha=$target_sha"
+          } >> "$GITHUB_OUTPUT"
 
   build_macos_aarch64:
     name: Build macOS Apple Silicon
-    needs:
-      - prepare
-      - quality_gate
+    needs: prepare
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -162,5 +171,5 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release upload "$TAG" release-artifacts/* --clobber
-          gh release edit "$TAG" --draft=false
+          gh release upload "$TAG" release-artifacts/* --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
