@@ -59,31 +59,29 @@ jobs:
             exit 1
           fi
 
-          target_sha="$(git rev-parse HEAD)"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+            target_sha="$existing_sha"
+          else
+            target_sha="$(git rev-parse HEAD)"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$target_sha" >/dev/null
+          fi
+
+          git checkout --detach "$target_sha"
           crate_version="$(script/get-crate-version zed)"
           if [[ "$TAG" != "pied-v$crate_version" ]]; then
             echo "::error::Tag $TAG does not match crates/zed version pied-v$crate_version"
             exit 1
           fi
 
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
-            if [[ "$existing_sha" != "$target_sha" ]]; then
-              echo "::error::Tag $TAG already points to $existing_sha, not $target_sha"
-              exit 1
-            fi
-          else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$TAG" \
-              -f sha="$target_sha" >/dev/null
-          fi
-
           previous_tag="$(git tag --merged "$target_sha^" --list 'pied-v*' --sort=-v:refname | grep -E '^pied-v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
           if [[ -n "$previous_tag" ]]; then
-            range="$previous_tag..$TAG"
+            range="$previous_tag..$target_sha"
             changelog_url="https://github.com/$GITHUB_REPOSITORY/compare/$previous_tag...$TAG"
           else
-            range="$TAG"
+            range="$target_sha"
             changelog_url="https://github.com/$GITHUB_REPOSITORY/commits/$TAG"
           fi
 
@@ -96,7 +94,8 @@ jobs:
             echo
             echo "## Build"
             echo
-            echo "- Ref: \`$BUILD_REF\`"
+            echo "- Requested ref: \`$BUILD_REF\`"
+            echo "- Source tag: \`$TAG\`"
             echo "- Commit: \`$target_sha\`"
             echo
             echo "## Changes"
