@@ -208,7 +208,7 @@ impl ReleaseChannel {
             ReleaseChannel::Dev => "pied",
             ReleaseChannel::Nightly => "Zed Nightly",
             ReleaseChannel::Preview => "Zed Preview",
-            ReleaseChannel::Stable => "Zed",
+            ReleaseChannel::Stable => "Pied",
         }
     }
 
@@ -224,13 +224,13 @@ impl ReleaseChannel {
 
     /// Returns the application ID that's used by Wayland as application ID
     /// and WM_CLASS on X11.
-    /// This also has to match the bundle identifier for Zed on macOS.
+    /// This also has to match the bundle identifier on macOS.
     pub fn app_id(&self) -> &'static str {
         match self {
             ReleaseChannel::Dev => "dev.zed.Zed-Dev",
             ReleaseChannel::Nightly => "dev.zed.Zed-Nightly",
             ReleaseChannel::Preview => "dev.zed.Zed-Preview",
-            ReleaseChannel::Stable => "dev.zed.Zed",
+            ReleaseChannel::Stable => "com.digitaloverground.pied",
         }
     }
 

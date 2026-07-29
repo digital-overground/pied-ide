@@ -10,10 +10,17 @@ Install the latest stable release:
 curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | sh
 ```
 
-Install a specific alpha or stable version:
+Or install through Homebrew:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | PIED_VERSION=1.0.0-alpha.2 sh
+brew tap digital-overground/tap
+brew install --cask pied
+```
+
+Install a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/digital-overground/pied-ide/main/script/install.sh | PIED_VERSION=1.0.0 sh
 ```
 
 The installer downloads `Pied-aarch64.dmg`, installs `Pied.app` in `/Applications`, and makes the `pied` command available through `~/.local/bin`.
@@ -22,9 +29,9 @@ The installer downloads `Pied-aarch64.dmg`, installs `Pied.app` in `/Application
 
 Pied uses its own version stream. The app version lives in [crates/zed/Cargo.toml](./crates/zed/Cargo.toml), and stable tags must match it as `pied-vMAJOR.MINOR.PATCH`.
 
-Use `Pied IDE Alpha Release` in GitHub Actions to create a prerelease from a branch or commit. It runs fast formatting, spelling, script, and workflow checks, then builds one Apple Silicon DMG. Cargo artifacts are cached so repeat builds avoid recompiling unchanged dependencies.
+Use `Pied IDE Release` in GitHub Actions to publish a release from a branch or commit. The release tag must match the app version. It runs fast formatting, spelling, script, and workflow checks, then builds one Apple Silicon DMG. Cargo artifacts are cached so repeat builds avoid recompiling unchanged dependencies.
 
-Pushing a stable tag, such as `pied-v1.0.0`, runs `Pied IDE Release`. It publishes the latest GitHub release, which the installer and in-app updater use.
+Every published build is a normal GitHub Release. The installer and in-app updater both use GitHub's latest release.
 
 ## Upstream
 
